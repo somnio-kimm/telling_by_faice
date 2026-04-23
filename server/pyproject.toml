@@ -1,0 +1,107 @@
+[project]
+name = "faice"
+dynamic = ["version"]
+description = "Emotion-reaction game backend: face detection, emotion classification, and LLM scenario generation for the TellingByfAIce Godot client."
+readme = "../README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "opencv-python>=4.10",
+    "pillow>=11.0",
+    "numpy>=2.0",
+    "torch>=2.4",
+    "torchvision>=0.19",
+    "ultralytics>=8.3",
+    "timm>=1.0",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "python-dotenv>=1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/OWNER/REPO"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "ruff>=0.8.6",
+    "pre-commit>=4.0.1",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "C4",
+    "DTZ",
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "FBT",
+    "FURB",
+    "I",
+    "ICN",
+    "ISC",
+    "LOG",
+    "N",
+    "PD",
+    "PERF",
+    "PIE",
+    "PLC",
+    "PLE",
+    "PLR1",
+    "PLR5",
+    "PLW",
+    "PT",
+    "Q",
+    "RET",
+    "RUF",
+    "SIM",
+    "SLF",
+    "T10",
+    "T20",
+    "UP",
+    "W",
+]
+ignore = [
+    "T201",   # We use print statements.
+    "PD008",
+    "ISC001",
+    "LOG015",
+]
+unfixable = [
+    "B905",
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+force-sort-within-sections = true
+single-line-exclusions = ["collections.abc", "typing", "typing_extensions"]
+
+[tool.ruff.lint.per-file-ignores]
+"*_test.py" = [
+    "SLF001",
+    "PLC0415",
+    "PT019",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/faice"]
+
+[tool.pytest.ini_options]
+markers = ["manual: should be run manually."]
+testpaths = ["tests"]
+pythonpath = ["src"]
