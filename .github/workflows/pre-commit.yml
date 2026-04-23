@@ -1,0 +1,50 @@
+name: pre-commit
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - "*"
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: [self-hosted]
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-24.04
+
+    env:
+      GIT_LFS_SKIP_SMUDGE: true
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y sudo git curl
+
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+
+      - name: Fetch submodules
+        env:
+          PAT: ${{ secrets.TOMMORO_AI_PAT }}
+        run: |
+          test -n "$PAT" || { echo "::error::TOMMORO_AI_PAT is not set"; exit 1; }
+          git config --global url."https://x-access-token:${PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule sync
+          git submodule update --init --recursive --depth=1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
