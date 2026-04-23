@@ -1,0 +1,61 @@
+name: test
+
+on:
+  pull_request:
+    branches:
+      - "*"
+
+permissions:
+  contents: read
+
+jobs:
+  run_tests:
+    name: Run Tests
+    runs-on: [self-hosted]
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-24.04
+      options: --gpus all
+
+    env:
+      GIT_LFS_SKIP_SMUDGE: true
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
+          apt-get install -y \
+            ffmpeg \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libswscale-dev
+
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+
+      - name: Fetch submodules
+        env:
+          PAT: ${{ secrets.TOMMORO_AI_PAT }}
+        run: |
+          test -n "$PAT" || { echo "::error::TOMMORO_AI_PAT is not set"; exit 1; }
+          git config --global url."https://x-access-token:${PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule sync
+          git submodule update --init --recursive --depth=1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install the project
+        run: uv sync --all-extras --dev
+
+      - name: Run tests
+        run: uv run pytest --strict-markers -m "not manual"
