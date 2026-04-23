@@ -1,0 +1,148 @@
+name: Claude Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  issue_comment:
+    types:
+      - created
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read 
+  id-token: write
+
+jobs:
+  claude-review:
+    if: >
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '@claude') &&
+        github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Capture review start time
+        id: review-start
+        run: echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          track_progress: true
+          show_full_output: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review according to REVIEW.md and CLAUDE.md.
+            Write the review in English.
+            If there are no meaningful findings, say that clearly.
+
+            Leave the overall summary in the tracked Claude comment.
+            Use `mcp__github_inline_comment__create_inline_comment` with `confirmed: true` for line-specific findings.
+            Do not use `gh pr comment`.
+            Only post GitHub comments. Do not submit the review text as assistant messages.
+          claude_args: |
+            --max-turns 64
+            --model claude-opus-4-6
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+
+      - name: Verify Claude posted PR feedback
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_START_AT: ${{ steps.review-start.outputs.timestamp }}
+          REVIEW_AUTHOR_LOGINS: ${{ 'claude[bot],github-actions[bot],github-actions' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          token = os.environ["GITHUB_TOKEN"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          review_start_at = os.environ["REVIEW_START_AT"]
+          allowed_author_logins = {
+              login.strip()
+              for login in os.environ["REVIEW_AUTHOR_LOGINS"].split(",")
+              if login.strip()
+          }
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "claude-review-verifier",
+          }
+
+          def fetch(url: str):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          issue_comments = fetch(
+              f"https://api.github.com/repos/{repository}/issues/{pr_number}/comments?per_page=100"
+          )
+          review_comments = fetch(
+              f"https://api.github.com/repos/{repository}/pulls/{pr_number}/comments?per_page=100"
+          )
+          reviews = fetch(
+              f"https://api.github.com/repos/{repository}/pulls/{pr_number}/reviews?per_page=100"
+          )
+
+          recent_issue_comments = [
+              comment
+              for comment in issue_comments
+              if comment.get("user", {}).get("login") in allowed_author_logins
+              and comment.get("created_at", "") >= review_start_at
+          ]
+          recent_reviews = [
+              review
+              for review in reviews
+              if review.get("user", {}).get("login") in allowed_author_logins
+              and review.get("submitted_at", "") >= review_start_at
+          ]
+          recent_review_comments = [
+              comment
+              for comment in review_comments
+              if comment.get("user", {}).get("login") in allowed_author_logins
+              and comment.get("created_at", "") >= review_start_at
+          ]
+
+          if recent_issue_comments or recent_reviews or recent_review_comments:
+              print(
+                  "Verified Claude feedback:",
+                  f"{len(recent_issue_comments)} issue comment(s),",
+                  f"{len(recent_reviews)} review(s),",
+                  f"{len(recent_review_comments)} inline comment(s)",
+              )
+              sys.exit(0)
+
+          print(
+              "Claude review workflow finished without posting a visible PR comment or review.",
+              file=sys.stderr,
+          )
+          sys.exit(1)
+          PY
